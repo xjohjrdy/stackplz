@@ -177,7 +177,7 @@ static __noinline u32 read_args(program_data_t* p, point_args_t* point_args, op_
                     op_ctx->read_len = MAX_BYTES_ARR_SIZE;
                 }
                 int save_struct_status = save_bytes_to_buf(p->event, (void *)(op_ctx->read_addr), op_ctx->read_len, op_ctx->save_index);
-                if (save_struct_status == 0) {
+                if (save_struct_status < 0) {
                     // 保存失败的情况 比如是一个非法的地址 那么就填一个空的 buf
                     // 那么只会保存 save_index 和 size -> [save_index][size][]
                     // ? 这里的处理方法好像不对 应该没问题 因为失败的时候 buf_off 没有变化
@@ -238,13 +238,13 @@ static __noinline u32 read_args(program_data_t* p, point_args_t* point_args, op_
             case OP_SAVE_STRING:
                 // fix memory tag
                 op_ctx->read_addr = op_ctx->read_addr & 0xffffffffffff;
-                u32 old_off = p->event->buf_off;
+                // 不要在调用前读 p->event->buf_off 来算长度 详见 buffer.h 的说明
                 int save_string_status = save_str_to_buf(p->event, (void*) op_ctx->read_addr, op_ctx->save_index);
-                if (save_string_status == 0) {
+                if (save_string_status < 0) {
                     // 失败的情况存一个空数据 暂时没有遇到 有待测试
                     save_bytes_to_buf(p->event, 0, 0, op_ctx->save_index);
                 } else {
-                   op_ctx->str_len = p->event->buf_off - (old_off + sizeof(int) + 1);
+                   op_ctx->str_len = save_string_status;
                 }
                 op_ctx->save_index += 1;
                 break;
@@ -257,7 +257,7 @@ static __noinline u32 read_args(program_data_t* p, point_args_t* point_args, op_
                 // 每次取出后使用前都要 fix 很坑
                 ptr = ptr & 0xffffffffffff;
                 int status = save_str_to_buf(p->event, (void*) ptr, op_ctx->save_index);
-                if (status == 0) {
+                if (status < 0) {
                     // save_str_to_buf 中应当将 bpf_probe_read_str 返回 0 时视为字符串为空
                     // 地址异常时 bpf_probe_read_str 返回为负数 此时将认为字符串数组读取结束
                     // 这里需要为字符串数组的读取设定一个标志 和空字符串的情况区分开
@@ -272,13 +272,13 @@ static __noinline u32 read_args(program_data_t* p, point_args_t* point_args, op_
             {
                 // fix memory tag
                 op_ctx->read_addr = op_ctx->read_addr & 0xffffffffffff;
-                u32 old_off = p->event->buf_off;
+                // 不要在调用前读 p->event->buf_off 来算长度 详见 buffer.h 的说明
                 int save_string_status = save_utf16_to_buf(p->event, (void*) op_ctx->read_addr, op_ctx->save_index);
-                if (save_string_status == 0) {
+                if (save_string_status < 0) {
                     // 失败的情况存一个空数据 暂时没有遇到 有待测试
                     save_bytes_to_buf(p->event, 0, 0, op_ctx->save_index);
                 } else {
-                   op_ctx->str_len = p->event->buf_off - (old_off + sizeof(int) + 1);
+                   op_ctx->str_len = save_string_status;
                 }
                 op_ctx->save_index += 1;
                 break;
@@ -292,7 +292,7 @@ static __noinline u32 read_args(program_data_t* p, point_args_t* point_args, op_
                 // 每次取出后使用前都要 fix 很坑
                 ptr = ptr & 0xffffffffffff;
                 int status = save_utf16_to_buf(p->event, (void*) ptr, op_ctx->save_index);
-                if (status == 0) {
+                if (status < 0) {
                     // save_str_to_buf 中应当将 bpf_probe_read_str 返回 0 时视为字符串为空
                     // 地址异常时 bpf_probe_read_str 返回为负数 此时将认为字符串数组读取结束
                     // 这里需要为字符串数组的读取设定一个标志 和空字符串的情况区分开

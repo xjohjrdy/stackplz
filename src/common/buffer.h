@@ -42,29 +42,30 @@ static __always_inline int save_to_submit_buf(event_data_t *event, void *ptr, u3
     return 0;
 }
 
+// 返回值：>= 0 表示成功 值为实际写入的字节数；-1 表示失败
+// 注意 调用方不要在调用本函数前后读取 event->buf_off 来计算长度
+// 否则编译器会把 buf_off 溢出到栈槽 并在边界检查之后回填
+// 验证器从栈槽恢复的是溢出时刻(未做边界检查)的状态 会导致 unbounded memory access
 static __always_inline int save_bytes_to_buf(event_data_t *event, void *ptr, u32 size, u8 index)
 {
     // Data saved to submit buf: [index][size][ ... bytes ... ]
 
-    // if (size == 0)
-    //     return 0;
-
     if (event->buf_off > ARGS_BUF_SIZE - 1)
-        return 0;
+        return -1;
 
     // Save argument index
     event->args[event->buf_off] = index;
 
     if (event->buf_off > ARGS_BUF_SIZE - (sizeof(int) + 1))
-        return 0;
+        return -1;
 
     // Save size to buffer
     if (bpf_probe_read(&(event->args[event->buf_off + 1]), sizeof(int), &size) != 0) {
-        return 0;
+        return -1;
     }
 
     if (event->buf_off > ARGS_BUF_SIZE - (MAX_BYTES_ARR_SIZE + 1 + sizeof(int)))
-        return 0;
+        return -1;
 
     // Read bytes into buffer
     if (size > 0) {
@@ -77,15 +78,15 @@ static __always_inline int save_bytes_to_buf(event_data_t *event, void *ptr, u32
             // We update buf_off only if all writes were successful
             event->buf_off += size + 1 + sizeof(int);
             event->context.argnum++;
-            return 1;
+            return (int) size;
         }
     } else {
         event->buf_off += size + 1 + sizeof(int);
         event->context.argnum++;
-        return 1;
+        return (int) size;
     }
 
-    return 0;
+    return -1;
 }
 
 // #define MAX_STR_ARR_ELEM      38
@@ -162,19 +163,21 @@ out:
 }
 
 
+// 返回值：>= 0 表示成功 值为字符串实际占用的字节数(含结尾\0)；-1 表示失败
+// 同 save_bytes_to_buf 调用方不要依赖调用前后的 event->buf_off 差值
 static __always_inline int save_str_to_buf(event_data_t *event, void *ptr, u8 index)
 {
     // Data saved to submit buf: [index][size][ ... string ... ]
 
     if (event->buf_off > ARGS_BUF_SIZE - 1)
-        return 0;
+        return -1;
 
     // Save argument index
     event->args[event->buf_off] = index;
 
     // Satisfy verifier for probe read
     if (event->buf_off > ARGS_BUF_SIZE - (MAX_STRING_SIZE + 1 + sizeof(int)))
-        return 0;
+        return -1;
 
     // Read into buffer
     int sz =
@@ -183,23 +186,22 @@ static __always_inline int save_str_to_buf(event_data_t *event, void *ptr, u8 in
         barrier();
         // Satisfy verifier for probe read
         if (event->buf_off > ARGS_BUF_SIZE - (MAX_STRING_SIZE + 1 + sizeof(int)))
-            return 0;
+            return -1;
 
         __builtin_memcpy(&(event->args[event->buf_off + 1]), &sz, sizeof(int));
         event->buf_off += sz + sizeof(int) + 1;
         event->context.argnum++;
-        return 1;
+        return sz;
     }
 
-    return 0;
+    return -1;
 }
 
+// 返回值：>= 0 表示成功 值为实际写入的字节数；-1 表示失败
 static __always_inline int save_utf16_to_buf(event_data_t *event, void *ptr, u8 index)
 {
-    // UTF16 最大字节数（必须是偶数）
-    int max_bytes = 512;
     // 直接调用 save_bytes_to_buf
-    return save_bytes_to_buf(event, ptr, max_bytes, index);
+    return save_bytes_to_buf(event, ptr, MAX_UTF16_SIZE, index);
 }
 
 static __always_inline int events_perf_submit(program_data_t *p, u32 id)

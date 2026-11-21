@@ -31,6 +31,8 @@
 #define PATH_MAX    4096
 #define MAX_STRING_SIZE    16384
 #define MAX_BYTES_ARR_SIZE    4096       // same as PATH_MAX
+// UTF16 字符串单次读取的最大字节数 必须是偶数
+#define MAX_UTF16_SIZE    512
 #define MAX_BUF_READ_SIZE    4096
 #define ARGS_BUF_SIZE       32000
 
